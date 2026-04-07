@@ -1,7 +1,8 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 export default buildModule("JobsModule", (m) => {
-  const jobs = m.contract("JobEscrow");
+  const usdcAddress = m.getParameter("usdcAddress");
+  const jobs = m.contract("JobEscrow", [usdcAddress]);
 
   return { jobs };
 });

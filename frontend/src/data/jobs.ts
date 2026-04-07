@@ -1,0 +1,154 @@
+import type { Application, Job, JobActivity } from "../types/jobs";
+
+export const SEEDED_JOBS: Job[] = [
+  {
+    id: "job_1",
+    title: "Build escrow dashboard for DAO contributors",
+    description:
+      "Need a Next.js dashboard to track milestone releases, dispute status, and payment history for 30+ contributors.",
+    skills: ["Next.js", "TypeScript", "Web3"],
+    status: "Open",
+    paymentType: "Fixed",
+    experience: "Senior",
+    budgetMin: 3500,
+    budgetMax: 5000,
+    currency: "USDC",
+    deadline: "2026-05-12",
+    location: "Remote",
+    clientName: "Atlas Collective",
+    createdAt: "2026-04-06T08:30:00.000Z",
+  },
+  {
+    id: "job_2",
+    title: "Smart contract audit report frontend",
+    description:
+      "Design and implement a clean report viewer for audit findings with severity filters and export support.",
+    skills: ["React", "Tailwind", "UX"],
+    status: "Funded",
+    paymentType: "Fixed",
+    experience: "Mid",
+    budgetMin: 1800,
+    budgetMax: 2200,
+    currency: "USDC",
+    deadline: "2026-04-28",
+    location: "Remote",
+    clientName: "Nebula Labs",
+    createdAt: "2026-04-06T16:45:00.000Z",
+    acceptedApplicationId: "app_2",
+    escrowTxHash: "0x6a2f...a9d3",
+  },
+  {
+    id: "job_3",
+    title: "Integrate wallet auth with role-based access",
+    description:
+      "Add wallet login and role-aware route guards for client/freelancer/admin views in the platform app.",
+    skills: ["WalletConnect", "NextAuth", "TypeScript"],
+    status: "Released",
+    paymentType: "Fixed",
+    experience: "Senior",
+    budgetMin: 2400,
+    budgetMax: 3200,
+    currency: "USDC",
+    deadline: "2026-04-22",
+    location: "Remote",
+    clientName: "ChainWorks",
+    createdAt: "2026-04-05T10:15:00.000Z",
+    acceptedApplicationId: "app_3",
+    escrowTxHash: "0x39d4...e1bc",
+  },
+];
+
+export const SEEDED_APPLICATIONS: Application[] = [
+  {
+    id: "app_1",
+    jobId: "job_1",
+    freelancerName: "Rafi Dev",
+    amount: 5000,
+    deliveryDays: 16,
+    coverLetter:
+      "I have shipped two escrow dashboard products and can deliver with clean tests and docs.",
+    status: "Pending",
+    createdAt: "2026-04-06T11:20:00.000Z",
+  },
+  {
+    id: "app_2",
+    jobId: "job_2",
+    freelancerName: "Alisa UI",
+    amount: 2200,
+    deliveryDays: 10,
+    coverLetter:
+      "Happy to lead interaction design and dashboard implementation from wireframe to release.",
+    status: "Accepted",
+    createdAt: "2026-04-07T03:40:00.000Z",
+  },
+  {
+    id: "app_3",
+    jobId: "job_3",
+    freelancerName: "Yusuf Chain",
+    amount: 3200,
+    deliveryDays: 14,
+    coverLetter:
+      "I can ship wallet auth + role guards fast and keep architecture clean for scaling.",
+    status: "Accepted",
+    createdAt: "2026-04-05T12:40:00.000Z",
+  },
+];
+
+export const SEEDED_ACTIVITY: JobActivity[] = [
+  {
+    id: "activity_1",
+    type: "job_posted",
+    message: "Atlas Collective posted a new job: Build escrow dashboard for DAO contributors",
+    createdAt: "2026-04-06T08:30:00.000Z",
+    jobId: "job_1",
+  },
+  {
+    id: "activity_2",
+    type: "job_applied",
+    message: "Rafi Dev applied to Build escrow dashboard for DAO contributors",
+    createdAt: "2026-04-06T11:20:00.000Z",
+    jobId: "job_1",
+  },
+  {
+    id: "activity_3",
+    type: "application_accepted",
+    message: "Nebula Labs accepted Alisa UI for Smart contract audit report frontend",
+    createdAt: "2026-04-07T06:10:00.000Z",
+    jobId: "job_2",
+  },
+  {
+    id: "activity_4",
+    type: "escrow_funded",
+    message: "Escrow funded for Smart contract audit report frontend",
+    createdAt: "2026-04-07T06:35:00.000Z",
+    jobId: "job_2",
+  },
+  {
+    id: "activity_5",
+    type: "application_accepted",
+    message: "ChainWorks accepted Yusuf Chain for Integrate wallet auth with role-based access",
+    createdAt: "2026-04-05T13:05:00.000Z",
+    jobId: "job_3",
+  },
+  {
+    id: "activity_6",
+    type: "escrow_funded",
+    message: "Escrow funded for Integrate wallet auth with role-based access",
+    createdAt: "2026-04-05T13:32:00.000Z",
+    jobId: "job_3",
+  },
+  {
+    id: "activity_7",
+    type: "work_delivered",
+    message: "Yusuf Chain marked work delivered",
+    createdAt: "2026-04-06T09:10:00.000Z",
+    jobId: "job_3",
+  },
+  {
+    id: "activity_8",
+    type: "payment_released",
+    message: "ChainWorks released milestone payment",
+    createdAt: "2026-04-06T10:05:00.000Z",
+    jobId: "job_3",
+  },
+];

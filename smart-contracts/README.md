@@ -1,57 +1,46 @@
-# Sample Hardhat 3 Beta Project (`mocha` and `ethers`)
+# JobEscrow Smart Contracts (USDC-based)
 
-This project showcases a Hardhat 3 Beta project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+This folder contains the `JobEscrow` contract used by the frontend portfolio flow:
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+`Open -> Accepted -> Funded -> Delivered -> Released`
 
-## Project Overview
+## Contract Overview
 
-This example project includes:
+Main contract:
+- `contracts/Job.sol` (`JobEscrow`)
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+Main actions:
+1. `createJob(budget)` by client
+2. `acceptFreelancer(jobId, worker)` by client
+3. `fundEscrow(jobId)` by client (pulls USDC via `transferFrom`)
+4. `submitWork(jobId)` by worker
+5. `releasePayment(jobId)` by client
 
-## Usage
+## Scripts
 
-### Running Tests
-
-To run all the tests in the project, execute the following command:
-
-```shell
-npx hardhat test
+```bash
+npm run compile
+npm run test
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
+Deploy to Sepolia (requires constructor parameter `usdcAddress`):
 
-```shell
-npx hardhat test solidity
-npx hardhat test mocha
+```bash
+npx hardhat ignition deploy \
+  --network sepolia \
+  ignition/modules/Job.ts \
+  --parameters '{"JobsModule":{"usdcAddress":"0xYourSepoliaUSDCAddress"}}'
 ```
 
-### Make a deployment to Sepolia
+## Notes for Frontend Integration
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
-
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
-
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
-
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
-
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+- Contract escrows ERC20 USDC-style tokens (not native ETH).
+- Client must `approve` escrow contract before `fundEscrow`.
+- `fundEscrow` pulls exactly `budget` amount.
+- Final release updates status to `Released` and zeroes escrow balance.
+- Useful events for UI timeline:
+  - `JobCreated`
+  - `JobAccepted`
+  - `EscrowFunded`
+  - `WorkDelivered`
+  - `PaymentReleased`

@@ -1,10 +1,12 @@
 {
   "name": "smart-contracts",
   "version": "1.0.0",
-  "description": "",
+  "description": "Smart contracts for escrow-freelance-web3",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "hardhat test",
+    "compile": "hardhat compile",
+    "deploy:sepolia": "hardhat ignition deploy --network sepolia ignition/modules/Job.ts"
   },
   "keywords": [],
   "author": "",
