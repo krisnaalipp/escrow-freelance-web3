@@ -1,0 +1,39 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-a751d8a2318d81c31e594a24aa2d995d38c9d35a",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "userSourceNameMap": {
+    "contracts/mocks/MockUSDC.sol": "project/contracts/mocks/MockUSDC.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/mocks/MockUSDC.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\ncontract MockUSDC {\n    string public name = \"Mock USDC\";\n    string public symbol = \"mUSDC\";\n    uint8 public decimals = 6;\n    uint256 public totalSupply;\n\n    mapping(address => uint256) public balanceOf;\n    mapping(address => mapping(address => uint256)) public allowance;\n\n    event Transfer(address indexed from, address indexed to, uint256 value);\n    event Approval(address indexed owner, address indexed spender, uint256 value);\n\n    function mint(address to, uint256 amount) external {\n        balanceOf[to] += amount;\n        totalSupply += amount;\n        emit Transfer(address(0), to, amount);\n    }\n\n    function approve(address spender, uint256 amount) external returns (bool) {\n        allowance[msg.sender][spender] = amount;\n        emit Approval(msg.sender, spender, amount);\n        return true;\n    }\n\n    function transfer(address to, uint256 amount) external returns (bool) {\n        if (balanceOf[msg.sender] < amount) {\n            return false;\n        }\n\n        balanceOf[msg.sender] -= amount;\n        balanceOf[to] += amount;\n        emit Transfer(msg.sender, to, amount);\n        return true;\n    }\n\n    function transferFrom(address from, address to, uint256 amount) external returns (bool) {\n        if (balanceOf[from] < amount) {\n            return false;\n        }\n\n        if (allowance[from][msg.sender] < amount) {\n            return false;\n        }\n\n        allowance[from][msg.sender] -= amount;\n        balanceOf[from] -= amount;\n        balanceOf[to] += amount;\n        emit Transfer(from, to, amount);\n        return true;\n    }\n}\n"
+      }
+    }
+  }
+}

@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useAccount } from "wagmi";
 
+import { useEscrowContract } from "../../hooks/useEscrowContract";
 import { useActiveRole } from "../../hooks/useActiveRole";
 import { useJobBoard } from "../../hooks/useJobBoard";
 import type { Job, JobStatus, NewApplicationInput } from "../../types/jobs";
@@ -46,10 +48,17 @@ function formatRelativeTime(isoDate: string) {
 
 function budgetLabel(job: Job) {
   if (job.paymentType === "Hourly") {
-    return `${job.budgetMin}-${job.budgetMax} ${job.currency}/hr`;
+    return `${job.budgetMax} ${job.currency}/hr`;
   }
 
-  return `${job.budgetMin}-${job.budgetMax} ${job.currency}`;
+  return `${job.budgetMax} ${job.currency}`;
+}
+
+function formatUsdcAmount(amount: number) {
+  return amount.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 export default function JobDetailClient({ jobId }: JobDetailClientProps) {
@@ -69,6 +78,21 @@ export default function JobDetailClient({ jobId }: JobDetailClientProps) {
   } = useJobBoard();
 
   const { activeRole, isClient, isFreelancer } = useActiveRole();
+  const { address, isConnected } = useAccount();
+  const {
+    acceptOnchainFreelancer,
+    errorMessage,
+    fundOnchainEscrow,
+    isPending,
+    mintMockUsdc,
+    releaseOnchainPayment,
+    resetStatus,
+    refreshTokenBalance,
+    submitOnchainWork,
+    successMessage,
+    tokenBalance,
+    tokenBalanceRaw,
+  } = useEscrowContract();
 
   const job = jobs.find((item) => item.id === jobId) ?? null;
 
@@ -98,21 +122,40 @@ export default function JobDetailClient({ jobId }: JobDetailClientProps) {
 
   const acceptedApplication = applications.find((item) => item.id === job?.acceptedApplicationId);
 
+  const normalizedAddress = address?.toLowerCase();
+  const isJobClient =
+    Boolean(normalizedAddress) && job?.clientAddress?.toLowerCase() === normalizedAddress;
+  const isJobWorker =
+    Boolean(normalizedAddress) && job?.workerAddress?.toLowerCase() === normalizedAddress;
+
   const nextActionLabel =
-    job?.status === "Accepted" && isClient
+    job?.status === "Accepted" && isJobClient
       ? "Fund escrow"
-      : job?.status === "Funded" && isFreelancer
+      : job?.status === "Funded" && isJobWorker
         ? "Mark delivered"
-        : job?.status === "Delivered" && isClient
+        : job?.status === "Delivered" && isJobClient
           ? "Release payment"
           : null;
 
   const currentStepIndex = job ? STATUS_STEPS.indexOf(job.status) : -1;
+  const jobBudgetUnits = job ? BigInt(Math.round(job.budgetMax * 1_000_000)) : null;
+  const hasEnoughJobBalance =
+    tokenBalanceRaw !== null && jobBudgetUnits !== null && tokenBalanceRaw >= jobBudgetUnits;
 
-  const onSubmitApplication = (event: React.FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    if (isConnected) {
+      void refreshTokenBalance();
+    }
+  }, [isConnected, address, refreshTokenBalance]);
+
+  const onSubmitApplication = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!job || !isFreelancer || job.status !== "Open") {
+      return;
+    }
+
+    if (!address || job.clientAddress?.toLowerCase() === address.toLowerCase()) {
       return;
     }
 
@@ -120,6 +163,7 @@ export default function JobDetailClient({ jobId }: JobDetailClientProps) {
       freelancerName: applicationForm.freelancerName.trim(),
       deliveryDays: Number(applicationForm.deliveryDays),
       coverLetter: applicationForm.coverLetter.trim(),
+      freelancerAddress: address,
     };
 
     if (
@@ -131,30 +175,77 @@ export default function JobDetailClient({ jobId }: JobDetailClientProps) {
       return;
     }
 
-    const created = applyToJob(job.id, payload);
+    const created = await applyToJob(job.id, payload);
 
     if (created) {
       setApplicationForm(APPLICATION_FORM_DEFAULTS);
     }
   };
 
-  const onRunNextStep = () => {
+  const onAcceptApplication = async (applicationId: string) => {
+    if (!job?.onchainJobId || !isJobClient) {
+      return;
+    }
+
+    const application = applications.find((item) => item.id === applicationId);
+
+    if (!application?.freelancerAddress) {
+      return;
+    }
+
+    resetStatus();
+    const result = await acceptOnchainFreelancer({
+      jobId: job.onchainJobId,
+      workerAddress: application.freelancerAddress as `0x${string}`,
+    });
+
+    if (result) {
+      await acceptApplication(job.id, applicationId, {
+        workerAddress: application.freelancerAddress,
+      });
+    }
+  };
+
+  const onRunNextStep = async () => {
     if (!job) {
       return;
     }
 
-    if (job.status === "Accepted" && isClient) {
-      fundEscrow(job.id);
+    if (job.status === "Accepted" && isJobClient && job.onchainJobId) {
+      resetStatus();
+
+      const result = await fundOnchainEscrow({
+        budget: job.budgetMax,
+        jobId: job.onchainJobId,
+      });
+
+      if (result) {
+        await fundEscrow(job.id, {
+          onchainJobId: job.onchainJobId,
+          txHash: result.txHash,
+        });
+      }
+
       return;
     }
 
-    if (job.status === "Funded" && isFreelancer) {
-      markDelivered(job.id);
+    if (job.status === "Funded" && isJobWorker && job.onchainJobId) {
+      resetStatus();
+      const result = await submitOnchainWork({ jobId: job.onchainJobId });
+
+      if (result) {
+        await markDelivered(job.id);
+      }
       return;
     }
 
-    if (job.status === "Delivered" && isClient) {
-      releasePayment(job.id);
+    if (job.status === "Delivered" && isJobClient && job.onchainJobId) {
+      resetStatus();
+      const result = await releaseOnchainPayment({ jobId: job.onchainJobId });
+
+      if (result) {
+        await releasePayment(job.id);
+      }
     }
   };
 
@@ -301,7 +392,15 @@ export default function JobDetailClient({ jobId }: JobDetailClientProps) {
                     {job.status === "Open" && isClient ? (
                       <button
                         type="button"
-                        onClick={() => acceptApplication(job.id, application.id)}
+                        onClick={() => onAcceptApplication(application.id)}
+                        disabled={
+                          isPending ||
+                          !isConnected ||
+                          !isJobClient ||
+                          !application.freelancerAddress ||
+                          application.freelancerAddress.toLowerCase() ===
+                            job.clientAddress?.toLowerCase()
+                        }
                         className="btn btn-secondary mt-2 text-xs"
                       >
                         Accept application
@@ -345,21 +444,62 @@ export default function JobDetailClient({ jobId }: JobDetailClientProps) {
                 </div>
               ) : null}
 
+              {job.status === "Accepted" && isJobClient ? (
+                <div className="surface-card mt-4 rounded-xl p-3">
+                  <p className="text-primary text-sm font-semibold">Client mUSDC balance</p>
+                  <p className="text-secondary mt-1 text-sm">{tokenBalance ?? "0.00"} mUSDC</p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      resetStatus();
+                      await mintMockUsdc({ amount: job.budgetMax });
+                    }}
+                    disabled={isPending}
+                    className="btn btn-secondary mt-3 text-xs"
+                  >
+                    {isPending
+                      ? "Submitting..."
+                      : `Mint ${formatUsdcAmount(job.budgetMax)} mUSDC`}
+                  </button>
+                </div>
+              ) : null}
+
               {nextActionLabel ? (
                 <button
                   type="button"
                   onClick={onRunNextStep}
+                  disabled={
+                    isPending ||
+                    (job.status === "Accepted" &&
+                      isJobClient &&
+                      !hasEnoughJobBalance)
+                  }
                   className="btn btn-primary mt-4 justify-center"
                 >
-                  {nextActionLabel}
+                  {isPending ? "Submitting..." : nextActionLabel}
                 </button>
               ) : job.status === "Accepted" || job.status === "Delivered" ? (
                 <p className="text-secondary mt-4 text-sm">
-                  Switch to <span className="text-primary font-semibold">Client</span> role for this step.
+                  Connect the client wallet to continue this step.
                 </p>
               ) : job.status === "Funded" ? (
                 <p className="text-secondary mt-4 text-sm">
-                  Switch to <span className="text-primary font-semibold">Freelancer</span> role for this step.
+                  Connect the accepted freelancer wallet to continue this step.
+                </p>
+              ) : null}
+
+              {successMessage ? (
+                <p className="mt-3 text-sm text-emerald-300">{successMessage}</p>
+              ) : null}
+
+              {errorMessage ? (
+                <p className="mt-3 text-sm text-rose-300">{errorMessage}</p>
+              ) : null}
+
+              {job.status === "Accepted" && isJobClient && !hasEnoughJobBalance ? (
+                <p className="mt-3 text-sm text-amber-300">
+                  Mint at least {formatUsdcAmount(job.budgetMax)} mUSDC before
+                  funding escrow.
                 </p>
               ) : null}
             </div>

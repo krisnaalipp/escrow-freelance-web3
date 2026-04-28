@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { SEEDED_ACTIVITY, SEEDED_APPLICATIONS, SEEDED_JOBS } from "../data/jobs";
 import type {
   Application,
   Job,
@@ -17,70 +16,44 @@ type JobBoardState = {
   activity: JobActivity[];
 };
 
-const STORAGE_KEY = "job-board-state-v2";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
-function createId(prefix: string) {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}_${crypto.randomUUID()}`;
+const EMPTY_STATE: JobBoardState = {
+  jobs: [],
+  applications: [],
+  activity: [],
+};
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
   }
 
-  return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-}
-
-function mockTxHash() {
-  return `0x${Math.random().toString(16).slice(2, 10)}...${Math.random().toString(16).slice(2, 6)}`;
-}
-
-function seedState(): JobBoardState {
-  return {
-    jobs: SEEDED_JOBS,
-    applications: SEEDED_APPLICATIONS,
-    activity: SEEDED_ACTIVITY,
-  };
-}
-
-function loadInitialState(): JobBoardState {
-  if (typeof window === "undefined") {
-    return seedState();
-  }
-
-  const rawState = window.localStorage.getItem(STORAGE_KEY);
-
-  if (!rawState) {
-    return seedState();
-  }
-
-  try {
-    return JSON.parse(rawState) as JobBoardState;
-  } catch {
-    return seedState();
-  }
+  return (await response.json()) as T;
 }
 
 export function useJobBoard() {
-  const [state, setState] = useState<JobBoardState>(loadInitialState);
+  const [state, setState] = useState<JobBoardState>(EMPTY_STATE);
   const [liveOnline, setLiveOnline] = useState(24);
 
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+  const refreshState = async () => {
+    const nextState = await request<JobBoardState>("/jobs");
+    setState(nextState);
+    return nextState;
+  };
 
   useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== STORAGE_KEY || !event.newValue) {
-        return;
-      }
-
-      try {
-        setState(JSON.parse(event.newValue) as JobBoardState);
-      } catch {
-        // Ignore malformed storage payloads.
-      }
-    };
-
-    window.addEventListener("storage", onStorage);
-
-    return () => window.removeEventListener("storage", onStorage);
+    void refreshState();
   }, []);
 
   useEffect(() => {
@@ -105,208 +78,73 @@ export function useJobBoard() {
     return grouped;
   }, [state.applications]);
 
-  const postJob = (input: NewJobInput) => {
-    const now = new Date().toISOString();
+  const postJob = async (input: NewJobInput) => {
+    const createdJob = await request<Job>("/jobs", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
 
-    const newJob: Job = {
-      id: createId("job"),
-      title: input.title,
-      description: input.description,
-      skills: input.skills,
-      status: "Open",
-      paymentType: input.paymentType,
-      experience: input.experience,
-      budgetMin: input.budgetMin,
-      budgetMax: input.budgetMax,
-      currency: "USDC",
-      deadline: input.deadline,
-      location: input.location,
-      clientName: input.clientName,
-      createdAt: now,
-    };
-
-    const newActivity: JobActivity = {
-      id: createId("activity"),
-      type: "job_posted",
-      message: `${input.clientName} posted a new job: ${input.title}`,
-      createdAt: now,
-      jobId: newJob.id,
-    };
-
-    setState((previous) => ({
-      jobs: [newJob, ...previous.jobs],
-      applications: previous.applications,
-      activity: [newActivity, ...previous.activity].slice(0, 30),
-    }));
-
-    return newJob;
+    await refreshState();
+    return createdJob;
   };
 
-  const applyToJob = (jobId: string, input: NewApplicationInput) => {
-    const job = state.jobs.find((item) => item.id === jobId);
-
-    if (!job) {
-      return null;
-    }
-
-    const now = new Date().toISOString();
-
-    const newApplication: Application = {
-      id: createId("app"),
-      jobId,
-      freelancerName: input.freelancerName,
-      amount: job.budgetMax,
-      deliveryDays: input.deliveryDays,
-      coverLetter: input.coverLetter,
-      status: "Pending",
-      createdAt: now,
-    };
-
-    const newActivity: JobActivity = {
-      id: createId("activity"),
-      type: "job_applied",
-      message: `${input.freelancerName} applied to ${job.title}`,
-      createdAt: now,
-      jobId,
-    };
-
-    setState((previous) => ({
-      jobs: previous.jobs,
-      applications: [newApplication, ...previous.applications],
-      activity: [newActivity, ...previous.activity].slice(0, 30),
-    }));
-
-    return newApplication;
-  };
-
-  const acceptApplication = (jobId: string, applicationId: string) => {
-    const job = state.jobs.find((item) => item.id === jobId);
-    const application = state.applications.find((item) => item.id === applicationId);
-
-    if (!job || !application || job.status !== "Open") {
-      return false;
-    }
-
-    const now = new Date().toISOString();
-
-    const newActivity: JobActivity = {
-      id: createId("activity"),
-      type: "application_accepted",
-      message: `${job.clientName} accepted ${application.freelancerName} for ${job.title}`,
-      createdAt: now,
-      jobId,
-    };
-
-    setState((previous) => ({
-      jobs: previous.jobs.map((item) =>
-        item.id === jobId
-          ? { ...item, status: "Accepted", acceptedApplicationId: applicationId }
-          : item,
-      ),
-      applications: previous.applications.map((item) => {
-        if (item.jobId !== jobId) {
-          return item;
-        }
-
-        if (item.id === applicationId) {
-          return { ...item, status: "Accepted" };
-        }
-
-        return { ...item, status: "Rejected" };
-      }),
-      activity: [newActivity, ...previous.activity].slice(0, 30),
-    }));
-
-    return true;
-  };
-
-  const fundEscrow = (jobId: string) => {
-    const job = state.jobs.find((item) => item.id === jobId);
-
-    if (!job || job.status !== "Accepted") {
-      return false;
-    }
-
-    const now = new Date().toISOString();
-    const txHash = mockTxHash();
-
-    const newActivity: JobActivity = {
-      id: createId("activity"),
-      type: "escrow_funded",
-      message: `Escrow funded for ${job.title} (${txHash})`,
-      createdAt: now,
-      jobId,
-    };
-
-    setState((previous) => ({
-      jobs: previous.jobs.map((item) =>
-        item.id === jobId ? { ...item, status: "Funded", escrowTxHash: txHash } : item,
-      ),
-      applications: previous.applications,
-      activity: [newActivity, ...previous.activity].slice(0, 30),
-    }));
-
-    return true;
-  };
-
-  const markDelivered = (jobId: string) => {
-    const job = state.jobs.find((item) => item.id === jobId);
-
-    if (!job || job.status !== "Funded") {
-      return false;
-    }
-
-    const now = new Date().toISOString();
-    const acceptedApplication = state.applications.find(
-      (item) => item.id === job.acceptedApplicationId,
+  const applyToJob = async (jobId: string, input: NewApplicationInput) => {
+    const createdApplication = await request<Application>(
+      `/jobs/${jobId}/applications`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
     );
 
-    const actor = acceptedApplication?.freelancerName ?? "Freelancer";
+    await refreshState();
+    return createdApplication;
+  };
 
-    const newActivity: JobActivity = {
-      id: createId("activity"),
-      type: "work_delivered",
-      message: `${actor} marked work delivered`,
-      createdAt: now,
-      jobId,
-    };
+  const acceptApplication = async (
+    jobId: string,
+    applicationId: string,
+    details?: { workerAddress?: string },
+  ) => {
+    await request(`/jobs/${jobId}/accept/${applicationId}`, {
+      method: "POST",
+      body: JSON.stringify(details ?? {}),
+    });
 
-    setState((previous) => ({
-      jobs: previous.jobs.map((item) =>
-        item.id === jobId ? { ...item, status: "Delivered" } : item,
-      ),
-      applications: previous.applications,
-      activity: [newActivity, ...previous.activity].slice(0, 30),
-    }));
-
+    await refreshState();
     return true;
   };
 
-  const releasePayment = (jobId: string) => {
-    const job = state.jobs.find((item) => item.id === jobId);
+  const fundEscrow = async (
+    jobId: string,
+    details?: { onchainJobId?: number; txHash?: string },
+  ) => {
+    await request(`/jobs/${jobId}/fund`, {
+      method: "POST",
+      body: JSON.stringify({ txHash: details?.txHash }),
+    });
 
-    if (!job || job.status !== "Delivered") {
-      return false;
-    }
+    await refreshState();
+    return true;
+  };
 
-    const now = new Date().toISOString();
+  const markDelivered = async (jobId: string) => {
+    await request(`/jobs/${jobId}/deliver`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
 
-    const newActivity: JobActivity = {
-      id: createId("activity"),
-      type: "payment_released",
-      message: `${job.clientName} released payment for ${job.title}`,
-      createdAt: now,
-      jobId,
-    };
+    await refreshState();
+    return true;
+  };
 
-    setState((previous) => ({
-      jobs: previous.jobs.map((item) =>
-        item.id === jobId ? { ...item, status: "Released" } : item,
-      ),
-      applications: previous.applications,
-      activity: [newActivity, ...previous.activity].slice(0, 30),
-    }));
+  const releasePayment = async (jobId: string) => {
+    await request(`/jobs/${jobId}/release`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
 
+    await refreshState();
     return true;
   };
 
@@ -321,6 +159,7 @@ export function useJobBoard() {
     acceptApplication,
     fundEscrow,
     markDelivered,
+    refreshState,
     releasePayment,
   };
 }

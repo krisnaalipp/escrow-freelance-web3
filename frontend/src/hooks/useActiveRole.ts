@@ -8,18 +8,19 @@ const ROLE_STORAGE_KEY = "active-role-v1";
 const ROLE_EVENT = "active-role-changed";
 
 function getInitialRole(): ActiveRole {
-  if (typeof window === "undefined") {
-    return "Client";
-  }
-
-  const savedRole = window.localStorage.getItem(ROLE_STORAGE_KEY);
-  return savedRole === "Freelancer" ? "Freelancer" : "Client";
+  return "Client";
 }
 
 export function useActiveRole() {
   const [activeRole, setActiveRoleState] = useState<ActiveRole>(getInitialRole);
 
   useEffect(() => {
+    const savedRole = window.localStorage.getItem(ROLE_STORAGE_KEY);
+
+    if (savedRole === "Client" || savedRole === "Freelancer") {
+      setActiveRoleState(savedRole);
+    }
+
     const onStorage = (event: StorageEvent) => {
       if (event.key !== ROLE_STORAGE_KEY || !event.newValue) {
         return;

@@ -23,12 +23,14 @@
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Shared backend for the escrow jobs board. It now uses Prisma with a local SQLite database, so jobs and applications persist across wallet switches and backend restarts.
 
 ## Project setup
 
 ```bash
 $ npm install
+$ npm run prisma:generate
+$ npm run prisma:push
 ```
 
 ## Compile and run the project
@@ -56,6 +58,16 @@ $ npm run test:e2e
 # test coverage
 $ npm run test:cov
 ```
+
+## Local database
+
+The backend uses SQLite by default through:
+
+```bash
+DATABASE_URL="file:./prisma/dev.db"
+```
+
+That value is already included in `.env` for local development.
 
 ## Deployment
 

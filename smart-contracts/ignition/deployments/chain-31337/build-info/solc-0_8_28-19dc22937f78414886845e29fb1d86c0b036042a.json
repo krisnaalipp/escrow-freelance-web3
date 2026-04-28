@@ -1,0 +1,39 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-19dc22937f78414886845e29fb1d86c0b036042a",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "userSourceNameMap": {
+    "contracts/Job.sol": "project/contracts/Job.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/Job.sol": {
+        "content": "// SPDX-License-Identifier: SEE LICENSE IN LICENSE\npragma solidity ^0.8.20;\n\ninterface IERC20 {\n    function transfer(address to, uint256 value) external returns (bool);\n    function transferFrom(address from, address to, uint256 value) external returns (bool);\n}\n\ncontract JobEscrow {\n    enum JobStatus {\n        Open,\n        Accepted,\n        Funded,\n        Delivered,\n        Released,\n        Cancelled\n    }\n\n    struct Job {\n        address client;\n        address worker;\n        uint256 budget;\n        uint256 escrowBalance;\n        JobStatus status;\n        uint256 createdAt;\n        uint256 completedAt;\n    }\n\n    IERC20 public immutable usdc;\n\n    uint256 public jobCount;\n    mapping(uint256 => Job) public jobs;\n\n    event JobCreated(uint256 indexed jobId, address indexed client, uint256 budget);\n    event JobAccepted(uint256 indexed jobId, address indexed worker);\n    event EscrowFunded(uint256 indexed jobId, uint256 amount);\n    event WorkDelivered(uint256 indexed jobId);\n    event PaymentReleased(uint256 indexed jobId, address indexed worker, uint256 amount);\n    event JobCancelled(uint256 indexed jobId);\n\n    modifier jobExists(uint256 _jobId) {\n        require(_jobId > 0 && _jobId <= jobCount, \"Job does not exist\");\n        _;\n    }\n\n    constructor(address _usdc) {\n        require(_usdc != address(0), \"Invalid USDC address\");\n        usdc = IERC20(_usdc);\n    }\n\n    function createJob(uint256 _budget) external {\n        require(_budget > 0, \"Budget must be greater than 0\");\n\n        jobCount++;\n        jobs[jobCount] = Job({\n            client: msg.sender,\n            worker: address(0),\n            budget: _budget,\n            escrowBalance: 0,\n            status: JobStatus.Open,\n            createdAt: block.timestamp,\n            completedAt: 0\n        });\n\n        emit JobCreated(jobCount, msg.sender, _budget);\n    }\n\n    function acceptFreelancer(uint256 _jobId, address _worker) public jobExists(_jobId) {\n        Job storage job = jobs[_jobId];\n        require(job.status == JobStatus.Open, \"Job is not open\");\n        require(msg.sender == job.client, \"Only client can accept\");\n        require(_worker != address(0), \"Invalid worker\");\n        require(_worker != job.client, \"Client cannot hire self\");\n\n        job.worker = _worker;\n        job.status = JobStatus.Accepted;\n\n        emit JobAccepted(_jobId, _worker);\n    }\n\n    // Backward-compatible alias for existing frontend naming.\n    function hireFreelancer(uint256 _jobId, address _worker) external {\n        acceptFreelancer(_jobId, _worker);\n    }\n\n    function fundEscrow(uint256 _jobId) external jobExists(_jobId) {\n        Job storage job = jobs[_jobId];\n        require(job.status == JobStatus.Accepted, \"Job is not accepted\");\n        require(msg.sender == job.client, \"Only client can fund\");\n\n        bool success = usdc.transferFrom(msg.sender, address(this), job.budget);\n        require(success, \"USDC transfer failed\");\n\n        job.escrowBalance = job.budget;\n        job.status = JobStatus.Funded;\n\n        emit EscrowFunded(_jobId, job.budget);\n    }\n\n    function submitWork(uint256 _jobId) external jobExists(_jobId) {\n        Job storage job = jobs[_jobId];\n        require(job.status == JobStatus.Funded, \"Escrow not funded\");\n        require(msg.sender == job.worker, \"Only worker can submit work\");\n\n        job.status = JobStatus.Delivered;\n        job.completedAt = block.timestamp;\n\n        emit WorkDelivered(_jobId);\n    }\n\n    function releasePayment(uint256 _jobId) external jobExists(_jobId) {\n        Job storage job = jobs[_jobId];\n        require(job.status == JobStatus.Delivered, \"Work not delivered\");\n        require(msg.sender == job.client, \"Only client can release payment\");\n        require(job.escrowBalance > 0, \"No funds in escrow\");\n\n        uint256 amount = job.escrowBalance;\n        job.escrowBalance = 0;\n        job.status = JobStatus.Released;\n\n        bool success = usdc.transfer(job.worker, amount);\n        require(success, \"USDC payout failed\");\n\n        emit PaymentReleased(_jobId, job.worker, amount);\n    }\n\n    function cancelJob(uint256 _jobId) external jobExists(_jobId) {\n        Job storage job = jobs[_jobId];\n        require(msg.sender == job.client, \"Only client can cancel\");\n        require(\n            job.status == JobStatus.Open || job.status == JobStatus.Accepted,\n            \"Cannot cancel now\"\n        );\n\n        job.status = JobStatus.Cancelled;\n        emit JobCancelled(_jobId);\n    }\n}\n"
+      }
+    }
+  }
+}

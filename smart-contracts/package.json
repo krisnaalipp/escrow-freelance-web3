@@ -6,7 +6,11 @@
   "scripts": {
     "test": "hardhat test",
     "compile": "hardhat compile",
-    "deploy:sepolia": "hardhat ignition deploy --network sepolia ignition/modules/Job.ts"
+    "deploy:local": "hardhat ignition deploy --network localhost ignition/modules/LocalJob.ts --reset",
+    "deploy:sepolia:demo": "hardhat ignition deploy --network sepolia ignition/modules/SepoliaDemo.ts",
+    "deploy:sepolia": "hardhat ignition deploy --network sepolia ignition/modules/Job.ts",
+    "smoke": "hardhat run scripts/smoke-local.ts",
+    "smoke:local": "hardhat run --network localhost scripts/smoke-local.ts"
   },
   "keywords": [],
   "author": "",

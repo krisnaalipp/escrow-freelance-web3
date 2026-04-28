@@ -1,5 +1,16 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Environment
+
+Sepolia demo contracts are configured through frontend env vars:
+
+```bash
+NEXT_PUBLIC_SEPOLIA_MOCK_USDC_ADDRESS=0x9118e32059123F6a4679509f912d08766E9FfcE6
+NEXT_PUBLIC_SEPOLIA_JOB_ESCROW_ADDRESS=0xc9A269b5F804A5D7b556C5b60276Ab63339d3B77
+```
+
+They are included in `.env.local` for your current setup. Restart the frontend dev server after changing them.
+
 ## Getting Started
 
 First, run the development server:

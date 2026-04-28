@@ -1,6 +1,14 @@
-export type JobStatus = "Open" | "Accepted" | "Funded" | "Delivered" | "Released";
-export type PaymentType = "Fixed" | "Hourly";
-export type ExperienceLevel = "Junior" | "Mid" | "Senior";
+export type JobStatus = 'Open' | 'Accepted' | 'Funded' | 'Delivered' | 'Released';
+export type PaymentType = 'Fixed' | 'Hourly';
+export type ExperienceLevel = 'Junior' | 'Mid' | 'Senior';
+export type ApplicationStatus = 'Pending' | 'Accepted' | 'Rejected';
+export type ActivityType =
+  | 'job_posted'
+  | 'job_applied'
+  | 'application_accepted'
+  | 'escrow_funded'
+  | 'work_delivered'
+  | 'payment_released';
 
 export type Job = {
   id: string;
@@ -24,8 +32,6 @@ export type Job = {
   workerAddress?: string;
 };
 
-export type ApplicationStatus = "Pending" | "Accepted" | "Rejected";
-
 export type Application = {
   id: string;
   jobId: string;
@@ -38,14 +44,6 @@ export type Application = {
   createdAt: string;
 };
 
-export type ActivityType =
-  | "job_posted"
-  | "job_applied"
-  | "application_accepted"
-  | "escrow_funded"
-  | "work_delivered"
-  | "payment_released";
-
 export type JobActivity = {
   id: string;
   type: ActivityType;
@@ -54,7 +52,13 @@ export type JobActivity = {
   jobId: string;
 };
 
-export type NewJobInput = {
+export type JobBoardState = {
+  jobs: Job[];
+  applications: Application[];
+  activity: JobActivity[];
+};
+
+export type CreateJobInput = {
   title: string;
   description: string;
   skills: string[];
@@ -69,9 +73,9 @@ export type NewJobInput = {
   onchainJobId?: number;
 };
 
-export type NewApplicationInput = {
+export type CreateApplicationInput = {
   freelancerName: string;
+  freelancerAddress?: string;
   deliveryDays: number;
   coverLetter: string;
-  freelancerAddress?: string;
 };

@@ -37,14 +37,14 @@ export default function Navbar() {
   const pathname = usePathname();
   const { activeRole, setActiveRole } = useActiveRole();
 
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    if (typeof window === "undefined") {
-      return "dark";
-    }
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
 
+  useEffect(() => {
     const savedTheme = window.localStorage.getItem("theme");
-    return savedTheme === "light" ? "light" : "dark";
-  });
+    if (savedTheme === "light" || savedTheme === "dark") {
+      setTheme(savedTheme);
+    }
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);

@@ -71,4 +71,17 @@ describe("JobEscrow (USDC)", function () {
       "USDC transfer failed",
     );
   });
+
+  it("does not allow client to hire self", async function () {
+    const [client] = await ethers.getSigners();
+
+    const usdc = await ethers.deployContract("MockUSDC", client);
+    const escrow = await ethers.deployContract("JobEscrow", [usdc.target], client);
+
+    await escrow.connect(client).createJob(1_000_000n);
+
+    await expect(
+      escrow.connect(client).acceptFreelancer(1n, client.address),
+    ).to.be.revertedWith("Client cannot hire self");
+  });
 });

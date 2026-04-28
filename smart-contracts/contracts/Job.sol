@@ -70,6 +70,7 @@ contract JobEscrow {
         require(job.status == JobStatus.Open, "Job is not open");
         require(msg.sender == job.client, "Only client can accept");
         require(_worker != address(0), "Invalid worker");
+        require(_worker != job.client, "Client cannot hire self");
 
         job.worker = _worker;
         job.status = JobStatus.Accepted;

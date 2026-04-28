@@ -9,12 +9,14 @@ export default function WorkflowSection() {
   const [activeRole, setActiveRole] = useState(WORKFLOW_ROLES[0].id);
 
   const selectedRole = useMemo(
-    () => WORKFLOW_ROLES.find((role) => role.id === activeRole) ?? WORKFLOW_ROLES[0],
+    () =>
+      WORKFLOW_ROLES.find((role) => role.id === activeRole) ??
+      WORKFLOW_ROLES[0],
     [activeRole],
   );
 
   return (
-    <section id="workflow" className="section-dark !pt-0">
+    <section id="workflow" className="section-dark pt-0!">
       <div className="app-container">
         <SectionHeading
           eyebrow="Escrow Workflow"
@@ -48,7 +50,9 @@ export default function WorkflowSection() {
               <p className="mb-2 text-sm font-semibold text-cyan-300">
                 Step {index + 1}
               </p>
-              <h3 className="text-primary mb-3 text-xl font-semibold">{step.title}</h3>
+              <h3 className="text-primary mb-3 text-xl font-semibold">
+                {step.title}
+              </h3>
               <p className="text-secondary text-sm">{step.description}</p>
             </article>
           ))}

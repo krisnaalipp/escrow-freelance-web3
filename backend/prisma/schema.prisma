@@ -5,10 +5,94 @@
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  Open
+  Accepted
+  Funded
+  Delivered
+  Released
+}
+
+enum PaymentType {
+  Fixed
+  Hourly
+}
+
+enum ExperienceLevel {
+  Junior
+  Mid
+  Senior
+}
+
+enum ApplicationStatus {
+  Pending
+  Accepted
+  Rejected
+}
+
+enum ActivityType {
+  job_posted
+  job_applied
+  application_accepted
+  escrow_funded
+  work_delivered
+  payment_released
+}
+
+model Job {
+  id                    String          @id
+  title                 String
+  description           String
+  skills                Json
+  status                JobStatus
+  paymentType           PaymentType
+  experience            ExperienceLevel
+  budgetMin             Int
+  budgetMax             Int
+  currency              String
+  deadline              String
+  location              String
+  clientName            String
+  createdAt             DateTime
+  clientAddress         String?
+  acceptedApplicationId String?
+  escrowTxHash          String?
+  onchainJobId          Int?
+  workerAddress         String?
+  applications          Application[]
+  activity              JobActivity[]
+}
+
+model Application {
+  id                String            @id
+  jobId             String
+  freelancerName    String
+  freelancerAddress String?
+  amount            Int
+  deliveryDays      Int
+  coverLetter       String
+  status            ApplicationStatus
+  createdAt         DateTime
+  job               Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
+
+model JobActivity {
+  id        String       @id
+  type      ActivityType
+  message   String
+  createdAt DateTime
+  jobId     String
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
 }

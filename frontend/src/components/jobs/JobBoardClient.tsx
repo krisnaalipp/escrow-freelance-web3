@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useAccount } from "wagmi";
 
+import { useEscrowContract } from "../../hooks/useEscrowContract";
 import { useActiveRole } from "../../hooks/useActiveRole";
 import { useJobBoard } from "../../hooks/useJobBoard";
 import type {
@@ -25,8 +27,7 @@ type JobFormState = {
   skills: string;
   paymentType: PaymentType;
   experience: ExperienceLevel;
-  budgetMin: string;
-  budgetMax: string;
+  budget: string;
   deadline: string;
   location: string;
   clientName: string;
@@ -44,8 +45,7 @@ const JOB_FORM_DEFAULTS: JobFormState = {
   skills: "",
   paymentType: "Fixed",
   experience: "Mid",
-  budgetMin: "",
-  budgetMax: "",
+  budget: "",
   deadline: "",
   location: "Remote",
   clientName: "",
@@ -66,7 +66,13 @@ const STATUS_FILTERS: Array<JobStatus | "All"> = [
   "Released",
 ];
 
-const STATUS_STEPS: JobStatus[] = ["Open", "Accepted", "Funded", "Delivered", "Released"];
+const STATUS_STEPS: JobStatus[] = [
+  "Open",
+  "Accepted",
+  "Funded",
+  "Delivered",
+  "Released",
+];
 
 function formatRelativeTime(isoDate: string) {
   const now = Date.now();
@@ -89,10 +95,17 @@ function formatRelativeTime(isoDate: string) {
 
 function budgetLabel(job: Job) {
   if (job.paymentType === "Hourly") {
-    return `${job.budgetMin}-${job.budgetMax} ${job.currency}/hr`;
+    return `${job.budgetMax} ${job.currency}/hr`;
   }
 
-  return `${job.budgetMin}-${job.budgetMax} ${job.currency}`;
+  return `${job.budgetMax} ${job.currency}`;
+}
+
+function formatUsdcAmount(amount: number) {
+  return amount.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
@@ -101,7 +114,9 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<JobStatus | "All">("All");
   const [showComposer, setShowComposer] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(initialJobId ?? null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(
+    initialJobId ?? null,
+  );
 
   const [jobForm, setJobForm] = useState<JobFormState>(JOB_FORM_DEFAULTS);
   const [applicationForm, setApplicationForm] = useState<ApplicationFormState>(
@@ -121,6 +136,22 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
     releasePayment,
   } = useJobBoard();
   const { activeRole, isClient, isFreelancer } = useActiveRole();
+  const { address, isConnected } = useAccount();
+  const {
+    acceptOnchainFreelancer,
+    createOnchainJob,
+    errorMessage,
+    fundOnchainEscrow,
+    isPending,
+    mintMockUsdc,
+    releaseOnchainPayment,
+    resetStatus,
+    refreshTokenBalance,
+    submitOnchainWork,
+    successMessage,
+    tokenBalance,
+    tokenBalanceRaw,
+  } = useEscrowContract();
 
   const isComposeModeFromUrl = searchParams.get("compose") === "1";
 
@@ -128,7 +159,8 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
     const loweredSearch = search.trim().toLowerCase();
 
     return jobs.filter((job) => {
-      const matchesStatus = statusFilter === "All" || job.status === statusFilter;
+      const matchesStatus =
+        statusFilter === "All" || job.status === statusFilter;
       const matchesSearch =
         loweredSearch.length === 0 ||
         job.title.toLowerCase().includes(loweredSearch) ||
@@ -140,12 +172,16 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
   }, [jobs, search, statusFilter]);
 
   const selectedJob =
-    jobs.find((job) => job.id === selectedJobId) ?? filteredJobs[0] ?? jobs[0] ?? null;
+    jobs.find((job) => job.id === selectedJobId) ??
+    filteredJobs[0] ??
+    jobs[0] ??
+    null;
 
   const selectedApplications = selectedJob
     ? (applicationsByJob.get(selectedJob.id) ?? []).sort(
         (first, second) =>
-          new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime(),
+          new Date(second.createdAt).getTime() -
+          new Date(first.createdAt).getTime(),
       )
     : [];
 
@@ -154,7 +190,8 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
         .filter((item) => item.jobId === selectedJob.id)
         .sort(
           (first, second) =>
-            new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime(),
+            new Date(first.createdAt).getTime() -
+            new Date(second.createdAt).getTime(),
         )
     : [];
 
@@ -162,7 +199,15 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
     (item) => item.id === selectedJob?.acceptedApplicationId,
   );
 
-  const onSubmitJob = (event: React.FormEvent<HTMLFormElement>) => {
+  const normalizedAddress = address?.toLowerCase();
+  const isSelectedJobClient =
+    Boolean(normalizedAddress) &&
+    selectedJob?.clientAddress?.toLowerCase() === normalizedAddress;
+  const isSelectedJobWorker =
+    Boolean(normalizedAddress) &&
+    selectedJob?.workerAddress?.toLowerCase() === normalizedAddress;
+
+  const onSubmitJob = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!isClient) {
@@ -180,8 +225,8 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
       skills,
       paymentType: jobForm.paymentType,
       experience: jobForm.experience,
-      budgetMin: Number(jobForm.budgetMin),
-      budgetMax: Number(jobForm.budgetMax),
+      budgetMin: Number(jobForm.budget),
+      budgetMax: Number(jobForm.budget),
       deadline: jobForm.deadline,
       location: jobForm.location.trim(),
       clientName: jobForm.clientName.trim(),
@@ -192,24 +237,40 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
       !payload.description ||
       payload.skills.length === 0 ||
       !payload.clientName ||
-      Number.isNaN(payload.budgetMin) ||
       Number.isNaN(payload.budgetMax) ||
-      payload.budgetMin <= 0 ||
-      payload.budgetMax < payload.budgetMin
+      payload.budgetMax <= 0
     ) {
       return;
     }
 
-    const createdJob = postJob(payload);
+    resetStatus();
+    const result = await createOnchainJob({ budget: payload.budgetMax });
+
+    if (!result) {
+      return;
+    }
+
+    const createdJob = await postJob({
+      ...payload,
+      clientAddress: address,
+      onchainJobId: result.jobId,
+    });
     setSelectedJobId(createdJob.id);
     setJobForm(JOB_FORM_DEFAULTS);
     setShowComposer(false);
   };
 
-  const onSubmitApplication = (event: React.FormEvent<HTMLFormElement>) => {
+  const onSubmitApplication = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!isFreelancer || !selectedJob || selectedJob.status !== "Open") {
+      return;
+    }
+
+    if (
+      !address ||
+      selectedJob.clientAddress?.toLowerCase() === address.toLowerCase()
+    ) {
       return;
     }
 
@@ -217,6 +278,7 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
       freelancerName: applicationForm.freelancerName.trim(),
       deliveryDays: Number(applicationForm.deliveryDays),
       coverLetter: applicationForm.coverLetter.trim(),
+      freelancerAddress: address,
     };
 
     if (
@@ -228,52 +290,120 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
       return;
     }
 
-    const created = applyToJob(selectedJob.id, payload);
+    const created = await applyToJob(selectedJob.id, payload);
 
     if (created) {
       setApplicationForm(APPLICATION_FORM_DEFAULTS);
     }
   };
 
-  const onRunNextStep = () => {
+  const onAcceptApplication = async (applicationId: string) => {
+    if (!selectedJob?.onchainJobId || !isSelectedJobClient) {
+      return;
+    }
+
+    const application = selectedApplications.find((item) => item.id === applicationId);
+
+    if (!application?.freelancerAddress) {
+      return;
+    }
+
+    resetStatus();
+    const result = await acceptOnchainFreelancer({
+      jobId: selectedJob.onchainJobId,
+      workerAddress: application.freelancerAddress as `0x${string}`,
+    });
+
+    if (result) {
+      await acceptApplication(selectedJob.id, applicationId, {
+        workerAddress: application.freelancerAddress,
+      });
+    }
+  };
+
+  const onRunNextStep = async () => {
     if (!selectedJob) {
       return;
     }
 
     if (selectedJob.status === "Accepted") {
-      if (!isClient) {
+      if (!isSelectedJobClient || !selectedJob.onchainJobId) {
         return;
       }
-      fundEscrow(selectedJob.id);
+
+      resetStatus();
+      const result = await fundOnchainEscrow({
+        budget: selectedJob.budgetMax,
+        jobId: selectedJob.onchainJobId,
+      });
+
+      if (result) {
+        await fundEscrow(selectedJob.id, {
+          onchainJobId: selectedJob.onchainJobId,
+          txHash: result.txHash,
+        });
+      }
+
       return;
     }
 
     if (selectedJob.status === "Funded") {
-      if (!isFreelancer) {
+      if (!isSelectedJobWorker || !selectedJob.onchainJobId) {
         return;
       }
-      markDelivered(selectedJob.id);
+
+      resetStatus();
+      const result = await submitOnchainWork({
+        jobId: selectedJob.onchainJobId,
+      });
+
+      if (result) {
+        await markDelivered(selectedJob.id);
+      }
       return;
     }
 
     if (selectedJob.status === "Delivered") {
-      if (!isClient) {
+      if (!isSelectedJobClient || !selectedJob.onchainJobId) {
         return;
       }
-      releasePayment(selectedJob.id);
+
+      resetStatus();
+      const result = await releaseOnchainPayment({
+        jobId: selectedJob.onchainJobId,
+      });
+
+      if (result) {
+        await releasePayment(selectedJob.id);
+      }
     }
   };
 
   const nextActionLabel =
-    selectedJob?.status === "Accepted" && isClient
+    selectedJob?.status === "Accepted" && isSelectedJobClient
       ? "Fund escrow"
-      : selectedJob?.status === "Funded" && isFreelancer
+      : selectedJob?.status === "Funded" && isSelectedJobWorker
         ? "Mark delivered"
-        : selectedJob?.status === "Delivered" && isClient
+        : selectedJob?.status === "Delivered" && isSelectedJobClient
           ? "Release payment"
           : null;
 
-  const currentStepIndex = selectedJob ? STATUS_STEPS.indexOf(selectedJob.status) : -1;
+  const currentStepIndex = selectedJob
+    ? STATUS_STEPS.indexOf(selectedJob.status)
+    : -1;
+  const selectedJobBudgetUnits = selectedJob
+    ? BigInt(Math.round(selectedJob.budgetMax * 1_000_000))
+    : null;
+  const hasEnoughSelectedJobBalance =
+    selectedJobBudgetUnits !== null &&
+    tokenBalanceRaw !== null &&
+    tokenBalanceRaw >= selectedJobBudgetUnits;
+
+  useEffect(() => {
+    if (isConnected) {
+      void refreshTokenBalance();
+    }
+  }, [isConnected, address, refreshTokenBalance]);
 
   return (
     <main className="min-h-screen bg-app-gradient py-10">
@@ -288,17 +418,23 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                 Web3 Jobs Board
               </h1>
               <p className="text-secondary mt-3 max-w-2xl">
-                Demo full hiring flow: post a job, apply, accept candidate, fund escrow,
-                deliver work, and release payment.
+                Demo full hiring flow: post a job, apply, accept candidate, fund
+                escrow, deliver work, and release payment.
               </p>
               <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-400/10 px-3 py-1">
-                <span className="text-secondary text-xs uppercase tracking-widest">Active role</span>
-                <span className="text-primary text-sm font-semibold">{activeRole}</span>
+                <span className="text-secondary text-xs uppercase tracking-widest">
+                  Active role
+                </span>
+                <span className="text-primary text-sm font-semibold">
+                  {activeRole}
+                </span>
               </div>
             </div>
 
             <div className="surface-card rounded-xl px-4 py-3">
-              <p className="text-secondary text-xs uppercase tracking-widest">Live now</p>
+              <p className="text-secondary text-xs uppercase tracking-widest">
+                Live now
+              </p>
               <p className="text-primary mt-1 flex items-center gap-2 text-sm font-semibold">
                 <span className="live-dot" />
                 {liveOnline} freelancers browsing
@@ -324,7 +460,9 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                       key={status}
                       type="button"
                       onClick={() => setStatusFilter(status)}
-                      className={statusFilter === status ? "chip chip-active" : "chip"}
+                      className={
+                        statusFilter === status ? "chip chip-active" : "chip"
+                      }
                     >
                       {status}
                     </button>
@@ -335,7 +473,8 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
 
             <div className="space-y-3">
               {filteredJobs.map((job) => {
-                const applicationCount = applicationsByJob.get(job.id)?.length ?? 0;
+                const applicationCount =
+                  applicationsByJob.get(job.id)?.length ?? 0;
                 const isActive = selectedJob?.id === job.id;
 
                 return (
@@ -350,13 +489,17 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                         <p className="text-secondary text-xs uppercase tracking-widest">
                           {job.clientName}
                         </p>
-                        <h2 className="text-primary mt-1 text-xl font-semibold">{job.title}</h2>
+                        <h2 className="text-primary mt-1 text-xl font-semibold">
+                          {job.title}
+                        </h2>
                       </div>
 
                       <span className="pill">{job.status}</span>
                     </div>
 
-                    <p className="text-secondary mt-3 text-sm">{job.description}</p>
+                    <p className="text-secondary mt-3 text-sm">
+                      {job.description}
+                    </p>
 
                     <div className="mt-4 flex flex-wrap gap-2">
                       {job.skills.map((skill) => (
@@ -367,9 +510,15 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                     </div>
 
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm">
-                      <p className="text-primary font-semibold">{budgetLabel(job)}</p>
-                      <p className="text-secondary">{applicationCount} applications</p>
-                      <p className="text-secondary">posted {formatRelativeTime(job.createdAt)}</p>
+                      <p className="text-primary font-semibold">
+                        {budgetLabel(job)}
+                      </p>
+                      <p className="text-secondary">
+                        {applicationCount} applications
+                      </p>
+                      <p className="text-secondary">
+                        posted {formatRelativeTime(job.createdAt)}
+                      </p>
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">
@@ -380,7 +529,10 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                       >
                         View details
                       </button>
-                      <Link href={`/jobs/${job.id}`} className="btn btn-secondary">
+                      <Link
+                        href={`/jobs/${job.id}`}
+                        className="btn btn-secondary"
+                      >
                         Open route
                       </Link>
                     </div>
@@ -390,7 +542,9 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
 
               {filteredJobs.length === 0 ? (
                 <div className="surface-card rounded-2xl p-5">
-                  <p className="text-primary font-semibold">No jobs match your filter yet.</p>
+                  <p className="text-primary font-semibold">
+                    No jobs match your filter yet.
+                  </p>
                   <p className="text-secondary mt-2 text-sm">
                     Try a broader search or post a new role.
                   </p>
@@ -402,7 +556,9 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
           <div className="space-y-4">
             <div className="surface-card-strong rounded-2xl p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-primary text-xl font-semibold">Post a job</h2>
+                <h2 className="text-primary text-xl font-semibold">
+                  Post a job
+                </h2>
                 <button
                   type="button"
                   onClick={() => setShowComposer((open) => !open)}
@@ -415,7 +571,9 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
 
               {!isClient ? (
                 <p className="text-secondary text-sm">
-                  Switch to <span className="text-primary font-semibold">Client</span> role to post jobs.
+                  Switch to{" "}
+                  <span className="text-primary font-semibold">Client</span>{" "}
+                  role to post jobs.
                 </p>
               ) : showComposer || isComposeModeFromUrl ? (
                 <form onSubmit={onSubmitJob} className="grid gap-3">
@@ -424,7 +582,10 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                     placeholder="Job title"
                     value={jobForm.title}
                     onChange={(event) =>
-                      setJobForm((previous) => ({ ...previous, title: event.target.value }))
+                      setJobForm((previous) => ({
+                        ...previous,
+                        title: event.target.value,
+                      }))
                     }
                     required
                   />
@@ -447,7 +608,10 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                     placeholder="Skills (comma separated)"
                     value={jobForm.skills}
                     onChange={(event) =>
-                      setJobForm((previous) => ({ ...previous, skills: event.target.value }))
+                      setJobForm((previous) => ({
+                        ...previous,
+                        skills: event.target.value,
+                      }))
                     }
                     required
                   />
@@ -483,30 +647,20 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                     </select>
                   </div>
 
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <input
-                      className="field"
-                      type="number"
-                      min={1}
-                      placeholder="Budget min"
-                      value={jobForm.budgetMin}
-                      onChange={(event) =>
-                        setJobForm((previous) => ({ ...previous, budgetMin: event.target.value }))
-                      }
-                      required
-                    />
-                    <input
-                      className="field"
-                      type="number"
-                      min={1}
-                      placeholder="Budget max"
-                      value={jobForm.budgetMax}
-                      onChange={(event) =>
-                        setJobForm((previous) => ({ ...previous, budgetMax: event.target.value }))
-                      }
-                      required
-                    />
-                  </div>
+                  <input
+                    className="field"
+                    type="number"
+                    min={1}
+                    placeholder="Fixed budget"
+                    value={jobForm.budget}
+                    onChange={(event) =>
+                      setJobForm((previous) => ({
+                        ...previous,
+                        budget: event.target.value,
+                      }))
+                    }
+                    required
+                  />
 
                   <div className="grid gap-3 md:grid-cols-2">
                     <input
@@ -514,7 +668,10 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                       type="date"
                       value={jobForm.deadline}
                       onChange={(event) =>
-                        setJobForm((previous) => ({ ...previous, deadline: event.target.value }))
+                        setJobForm((previous) => ({
+                          ...previous,
+                          deadline: event.target.value,
+                        }))
                       }
                       required
                     />
@@ -523,7 +680,10 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                       placeholder="Location"
                       value={jobForm.location}
                       onChange={(event) =>
-                        setJobForm((previous) => ({ ...previous, location: event.target.value }))
+                        setJobForm((previous) => ({
+                          ...previous,
+                          location: event.target.value,
+                        }))
                       }
                       required
                     />
@@ -534,46 +694,71 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                     placeholder="Client / Team name"
                     value={jobForm.clientName}
                     onChange={(event) =>
-                      setJobForm((previous) => ({ ...previous, clientName: event.target.value }))
+                      setJobForm((previous) => ({
+                        ...previous,
+                        clientName: event.target.value,
+                      }))
                     }
                     required
                   />
 
-                  <button type="submit" className="btn btn-primary justify-center">
+                  <button
+                    type="submit"
+                    className="btn btn-primary justify-center"
+                  >
                     Post job live
                   </button>
                 </form>
               ) : (
                 <p className="text-secondary text-sm">
-                  Open the form to publish a new role. Fresh jobs appear instantly on the board.
+                  Open the form to publish a new role. Fresh jobs appear
+                  instantly on the board.
                 </p>
               )}
             </div>
 
-            <div className="surface-card rounded-2xl p-5 lg:sticky lg:top-24">
-              <h2 className="text-primary text-xl font-semibold">Selected job</h2>
+            <div className="surface-card rounded-2xl p-5">
+              <h2 className="text-primary text-xl font-semibold">
+                Selected job
+              </h2>
               {selectedJob ? (
                 <>
                   <div className="mt-3 flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-primary text-lg font-semibold">{selectedJob.title}</p>
-                      <p className="text-secondary mt-1 text-sm">{selectedJob.description}</p>
+                      <p className="text-primary text-lg font-semibold">
+                        {selectedJob.title}
+                      </p>
+                      <p className="text-secondary mt-1 text-sm">
+                        {selectedJob.description}
+                      </p>
                     </div>
                     <span className="pill">{selectedJob.status}</span>
                   </div>
 
                   <div className="mt-4 grid gap-2 text-sm md:grid-cols-2">
                     <p className="text-secondary">
-                      Budget: <span className="text-primary font-semibold">{budgetLabel(selectedJob)}</span>
+                      Budget:{" "}
+                      <span className="text-primary font-semibold">
+                        {budgetLabel(selectedJob)}
+                      </span>
                     </p>
                     <p className="text-secondary">
-                      Deadline: <span className="text-primary font-semibold">{selectedJob.deadline}</span>
+                      Deadline:{" "}
+                      <span className="text-primary font-semibold">
+                        {selectedJob.deadline}
+                      </span>
                     </p>
                     <p className="text-secondary">
-                      Experience: <span className="text-primary font-semibold">{selectedJob.experience}</span>
+                      Experience:{" "}
+                      <span className="text-primary font-semibold">
+                        {selectedJob.experience}
+                      </span>
                     </p>
                     <p className="text-secondary">
-                      Location: <span className="text-primary font-semibold">{selectedJob.location}</span>
+                      Location:{" "}
+                      <span className="text-primary font-semibold">
+                        {selectedJob.location}
+                      </span>
                     </p>
                   </div>
 
@@ -586,24 +771,45 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                   </div>
                 </>
               ) : (
-                <p className="text-secondary mt-3 text-sm">Select a job to see details and apply.</p>
+                <p className="text-secondary mt-3 text-sm">
+                  Select a job to see details and apply.
+                </p>
               )}
             </div>
 
             <div className="surface-card rounded-2xl p-5">
-              <h2 className="text-primary text-xl font-semibold">Workflow actions</h2>
+              <h2 className="text-primary text-xl font-semibold">
+                Workflow actions
+              </h2>
               {selectedJob ? (
                 <>
                   <div className="mt-3 space-y-2">
-                    <p className="text-primary text-sm font-semibold">Status tracker</p>
+                    <p className="text-primary text-sm font-semibold">
+                      Status tracker
+                    </p>
                     <div className="grid gap-2">
                       {STATUS_STEPS.map((step, index) => {
                         const isDone = currentStepIndex >= index;
 
                         return (
-                          <div key={step} className="surface-card flex items-center gap-2 rounded-xl px-3 py-2">
-                            <span className={isDone ? "live-dot" : "h-2 w-2 rounded-full bg-slate-500"} />
-                            <p className={isDone ? "text-primary text-sm font-semibold" : "text-secondary text-sm"}>
+                          <div
+                            key={step}
+                            className="surface-card flex items-center gap-2 rounded-xl px-3 py-2"
+                          >
+                            <span
+                              className={
+                                isDone
+                                  ? "live-dot"
+                                  : "h-2 w-2 rounded-full bg-slate-500"
+                              }
+                            />
+                            <p
+                              className={
+                                isDone
+                                  ? "text-primary text-sm font-semibold"
+                                  : "text-secondary text-sm"
+                              }
+                            >
                               {step}
                             </p>
                           </div>
@@ -614,8 +820,12 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
 
                   {acceptedApplication ? (
                     <div className="surface-card mt-4 rounded-xl p-3">
-                      <p className="text-primary text-sm font-semibold">Selected freelancer</p>
-                      <p className="text-secondary mt-1 text-sm">{acceptedApplication.freelancerName}</p>
+                      <p className="text-primary text-sm font-semibold">
+                        Selected freelancer
+                      </p>
+                      <p className="text-secondary mt-1 text-sm">
+                        {acceptedApplication.freelancerName}
+                      </p>
                       {selectedJob.escrowTxHash ? (
                         <p className="text-secondary mt-1 text-xs">
                           Escrow tx: {selectedJob.escrowTxHash}
@@ -624,21 +834,74 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                     </div>
                   ) : null}
 
+                  {selectedJob.status === "Accepted" && isSelectedJobClient ? (
+                    <div className="surface-card mt-4 rounded-xl p-3">
+                      <p className="text-primary text-sm font-semibold">
+                        Client mUSDC balance
+                      </p>
+                      <p className="text-secondary mt-1 text-sm">
+                        {tokenBalance ?? "0.00"} mUSDC
+                      </p>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          resetStatus();
+                          await mintMockUsdc({ amount: selectedJob.budgetMax });
+                        }}
+                        disabled={isPending}
+                        className="btn btn-secondary mt-3 text-xs"
+                      >
+                        {isPending
+                          ? "Submitting..."
+                          : `Mint ${formatUsdcAmount(selectedJob.budgetMax)} mUSDC`}
+                      </button>
+                    </div>
+                  ) : null}
+
                   {nextActionLabel ? (
                     <button
                       type="button"
                       onClick={onRunNextStep}
+                      disabled={
+                        isPending ||
+                        (selectedJob.status === "Accepted" &&
+                          isSelectedJobClient &&
+                          !hasEnoughSelectedJobBalance)
+                      }
                       className="btn btn-primary mt-4 justify-center"
                     >
-                      {nextActionLabel}
+                      {isPending ? "Submitting..." : nextActionLabel}
                     </button>
-                  ) : selectedJob.status === "Accepted" || selectedJob.status === "Delivered" ? (
+                  ) : selectedJob.status === "Accepted" ||
+                    selectedJob.status === "Delivered" ? (
                     <p className="text-secondary mt-4 text-sm">
-                      Switch to <span className="text-primary font-semibold">Client</span> role for this step.
+                      Connect the client wallet to continue this step.
                     </p>
                   ) : selectedJob.status === "Funded" ? (
                     <p className="text-secondary mt-4 text-sm">
-                      Switch to <span className="text-primary font-semibold">Freelancer</span> role for this step.
+                      Connect the accepted freelancer wallet to continue this
+                      step.
+                    </p>
+                  ) : null}
+
+                  {successMessage ? (
+                    <p className="mt-3 text-sm text-emerald-300">
+                      {successMessage}
+                    </p>
+                  ) : null}
+
+                  {errorMessage ? (
+                    <p className="mt-3 text-sm text-rose-300">
+                      {errorMessage}
+                    </p>
+                  ) : null}
+
+                  {selectedJob.status === "Accepted" &&
+                  isSelectedJobClient &&
+                  !hasEnoughSelectedJobBalance ? (
+                    <p className="mt-3 text-sm text-amber-300">
+                      Mint at least {formatUsdcAmount(selectedJob.budgetMax)}{" "}
+                      mUSDC before funding escrow.
                     </p>
                   ) : null}
                 </>
@@ -646,11 +909,16 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
             </div>
 
             <div className="surface-card rounded-2xl p-5">
-              <h2 className="text-primary text-xl font-semibold">Applications</h2>
+              <h2 className="text-primary text-xl font-semibold">
+                Applications
+              </h2>
               {selectedJob ? (
                 <>
                   {selectedJob.status === "Open" && isFreelancer ? (
-                    <form onSubmit={onSubmitApplication} className="mt-4 grid gap-3">
+                    <form
+                      onSubmit={onSubmitApplication}
+                      className="mt-4 grid gap-3"
+                    >
                       <input
                         className="field"
                         placeholder="Your name"
@@ -665,7 +933,11 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                       />
 
                       <div className="grid gap-3 md:grid-cols-2">
-                        <input className="field" value={budgetLabel(selectedJob)} readOnly />
+                        <input
+                          className="field"
+                          value={budgetLabel(selectedJob)}
+                          readOnly
+                        />
                         <input
                           className="field"
                           type="number"
@@ -695,35 +967,58 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                         required
                       />
 
-                      <button type="submit" className="btn btn-primary justify-center">
+                      <button
+                        type="submit"
+                        className="btn btn-primary justify-center"
+                      >
                         Apply now
                       </button>
                     </form>
                   ) : selectedJob.status === "Open" ? (
                     <p className="text-secondary mt-4 text-sm">
-                      Switch to <span className="text-primary font-semibold">Freelancer</span> role to apply.
+                      Switch to{" "}
+                      <span className="text-primary font-semibold">
+                        Freelancer
+                      </span>{" "}
+                      role to apply.
                     </p>
                   ) : null}
 
                   <div className="mt-4 space-y-2">
                     {selectedApplications.slice(0, 4).map((application) => (
-                      <div key={application.id} className="surface-card rounded-xl p-3">
+                      <div
+                        key={application.id}
+                        className="surface-card rounded-xl p-3"
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-primary text-sm font-semibold">
                             {application.freelancerName}
                           </p>
-                          <span className="pill-muted">{application.status}</span>
+                          <span className="pill-muted">
+                            {application.status}
+                          </span>
                         </div>
                         <p className="text-secondary text-xs">
-                          {budgetLabel(selectedJob)} • {application.deliveryDays} days •{" "}
+                          {budgetLabel(selectedJob)} •{" "}
+                          {application.deliveryDays} days •{" "}
                           {formatRelativeTime(application.createdAt)}
                         </p>
-                        <p className="text-secondary mt-1 text-xs">{application.coverLetter}</p>
+                        <p className="text-secondary mt-1 text-xs">
+                          {application.coverLetter}
+                        </p>
 
                         {selectedJob.status === "Open" && isClient ? (
                           <button
                             type="button"
-                            onClick={() => acceptApplication(selectedJob.id, application.id)}
+                            onClick={() => onAcceptApplication(application.id)}
+                            disabled={
+                              isPending ||
+                              !isConnected ||
+                              !isSelectedJobClient ||
+                              !application.freelancerAddress ||
+                              application.freelancerAddress.toLowerCase() ===
+                                selectedJob.clientAddress?.toLowerCase()
+                            }
                             className="btn btn-secondary mt-2 text-xs"
                           >
                             Accept application
@@ -733,17 +1028,23 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                     ))}
 
                     {selectedApplications.length === 0 ? (
-                      <p className="text-secondary text-sm">No applications yet.</p>
+                      <p className="text-secondary text-sm">
+                        No applications yet.
+                      </p>
                     ) : null}
                   </div>
                 </>
               ) : (
-                <p className="text-secondary mt-3 text-sm">Select a job to see applications.</p>
+                <p className="text-secondary mt-3 text-sm">
+                  Select a job to see applications.
+                </p>
               )}
             </div>
 
             <div className="surface-card rounded-2xl p-5">
-              <h2 className="text-primary text-lg font-semibold">Job timeline</h2>
+              <h2 className="text-primary text-lg font-semibold">
+                Job timeline
+              </h2>
               <div className="mt-3 space-y-2">
                 {selectedActivity.length > 0 ? (
                   selectedActivity.map((item) => (
@@ -755,7 +1056,9 @@ export default function JobBoardClient({ initialJobId }: JobBoardClientProps) {
                     </div>
                   ))
                 ) : (
-                  <p className="text-secondary text-sm">No timeline events yet.</p>
+                  <p className="text-secondary text-sm">
+                    No timeline events yet.
+                  </p>
                 )}
               </div>
             </div>
